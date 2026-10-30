@@ -1,0 +1,19 @@
+{
+  "name": "smart-attendance",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.3.0",
+    "qrcode": "^1.5.4",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true
+  }
+}

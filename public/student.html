@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Student · Smart Attendance</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView" class="center" style="display:none">
+  <div class="card auth">
+    <div class="logo"><span class="logo-mark">◈</span> Student Login</div>
+    <form id="loginForm">
+      <div class="field">
+        <label>Roll No.</label>
+        <input id="sRoll" placeholder="CSE001" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="sPass" type="password" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <button class="btn-primary" style="width:100%">Log in</button>
+    </form>
+    <p style="margin-top:16px;text-align:center"><a href="/" style="color:var(--muted);font-size:.85rem">← Back</a></p>
+  </div>
+</div>
+
+<!-- PORTAL -->
+<div id="portalView" class="container" style="display:none">
+  <div class="topbar">
+    <h1>Student Portal</h1>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span class="who" id="whoS"></span>
+      <button class="btn-ghost" id="logoutS" style="padding:8px 14px;font-size:.85rem">Logout</button>
+    </div>
+  </div>
+
+  <h2 class="section-title">Upcoming lectures</h2>
+  <div id="lectures" class="lecture-list"></div>
+
+  <!-- QR MODAL -->
+  <div id="qrPanel" style="display:none;margin-top:28px">
+    <h2 class="section-title" id="qrTitle">Scan to mark attendance</h2>
+    <div class="card">
+      <div class="qr-wrap">
+        <div class="qr-box"><img id="qrImg" alt="QR code"></div>
+        <div class="timer" id="qrTimer">10</div>
+        <div class="qr-meta" id="qrMeta"></div>
+        <button class="btn-ghost" id="closeQr" style="padding:8px 16px;font-size:.85rem">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function toast(msg, type='info'){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(t._t);
+  t._t = setTimeout(()=> t.className='toast', 2600);
+}
+async function api(url, opts={}){
+  const r = await fetch(url, { headers:{'Content-Type':'application/json'}, ...opts });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* --- Session check --- */
+let me = null;
+(async () => {
+  me = await api('/api/me');
+  if(me.role === 'student'){
+    $('loginView').style.display = 'none';
+    $('portalView').style.display = 'block';
+    $('whoS').textContent = `${me.name} · ${me.rollno} · ${me.branch}`;
+    loadLectures();
+    setInterval(loadLectures, 5000); // auto-refresh lecture list
+  } else {
+    $('loginView').style.display = 'grid';
+  }
+})();
+
+/* --- Login --- */
+$('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try{
+    await api('/api/login', { method:'POST', body: JSON.stringify({
+      role:'student',
+      rollno: $('sRoll').value.trim().toUpperCase(),
+      password: $('sPass').value
+    })});
+    location.reload();
+  }catch(err){ toast(err.message,'err'); }
+};
+
+$('logoutS').onclick = async () => {
+  await api('/api/logout', { method:'POST' });
+  location.href = '/';
+};
+
+/* --- Lecture list --- */
+async function loadLectures(){
+  try{
+    const list = await api('/api/student/lectures');
+    const box = $('lectures');
+    if(!list.length){
+      box.innerHTML = '<div class="card empty">No active lectures for your branch right now. This page refreshes automatically.</div>';
+      return;
+    }
+    box.innerHTML = list.map(l => `
+      <div class="lecture">
+        <div class="meta">
+          <h3>${esc(l.subject)}
+            ${l.already_marked ? '<span class="pill marked">marked present</span>' : '<span class="pill active">live</span>'}
+          </h3>
+          <div class="details">
+            <span>👩‍🏫 ${esc(l.teacher_name)}</span>
+            <span>📚 ${esc(l.branch)}</span>
+            <span>🏫 Room ${esc(l.room)}</span>
+            <span>📅 ${esc(l.lecture_date)}</span>
+            <span>🕒 ${esc(l.start_time)}</span>
+            <span>⏱ ${l.duration_min} min</span>
+          </div>
+        </div>
+        <div>
+          ${l.already_marked
+            ? '<button class="btn-ghost" disabled style="opacity:.5;padding:9px 15px;font-size:.83rem">✓ Present</button>'
+            : `<button class="btn-primary" onclick="openQr(${l.id}, '${esc(l.subject)}')" style="padding:9px 15px;font-size:.83rem">Mark Attendance</button>`
+          }
+        </div>
+      </div>
+    `).join('');
+  }catch(err){ /* silent on auto-refresh */ }
+}
+
+/* --- QR generation & 10-second refresh --- */
+let qrTimerId = null;
+let qrCountdownId = null;
+let currentLectureId = null;
+
+async function openQr(lectureId, subject){
+  currentLectureId = lectureId;
+  $('qrPanel').style.display = 'block';
+  $('qrTitle').textContent = `Scan to mark attendance — ${subject}`;
+  $('qrPanel').scrollIntoView({behavior:'smooth', block:'start'});
+  await refreshQr();
+}
+
+async function refreshQr(){
+  if(!currentLectureId) return;
+  clearTimeout(qrTimerId);
+  clearInterval(qrCountdownId);
+  try{
+    const data = await api(`/api/student/qr/${currentLectureId}`);
+    $('qrImg').src = data.qr;
+    $('qrMeta').innerHTML = `${esc(data.rollno)} · ${esc(data.name)}<br>QR refreshes every 10 seconds`;
+    // Countdown
+    let left = data.expiresIn;
+    $('qrTimer').textContent = left;
+    $('qrTimer').classList.remove('warn');
+    qrCountdownId = setInterval(() => {
+      left--;
+      if(left <= 0){ clearInterval(qrCountdownId); return; }
+      $('qrTimer').textContent = left;
+      if(left <= 3) $('qrTimer').classList.add('warn');
+    }, 1000);
+    // Auto-refresh
+    qrTimerId = setTimeout(refreshQr, data.expiresIn * 1000);
+  }catch(err){
+    toast(err.message, 'err');
+    closeQr();
+  }
+}
+
+function closeQr(){
+  clearTimeout(qrTimerId);
+  clearInterval(qrCountdownId);
+  currentLectureId = null;
+  $('qrPanel').style.display = 'none';
+}
+$('closeQr').onclick = closeQr;
+
+/* --- Stop QR refresh when tab is hidden (save battery / avoid rate limits) --- */
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden && currentLectureId){ clearTimeout(qrTimerId); clearInterval(qrCountdownId); }
+  else if(!document.hidden && currentLectureId){ refreshQr(); }
+});
+</script>
+</body>
+</html>

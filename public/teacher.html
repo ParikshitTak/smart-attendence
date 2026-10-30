@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Teacher · Smart Attendance</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView" class="center" style="display:none">
+  <div class="card auth">
+    <div class="logo"><span class="logo-mark">◈</span> Teacher Login</div>
+    <form id="loginForm">
+      <div class="field">
+        <label>Name</label>
+        <input id="tName" placeholder="prof_sharma" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="tPass" type="password" placeholder="••••••••" required>
+      </div>
+      <button class="btn-primary" style="width:100%">Log in</button>
+    </form>
+    <p style="margin-top:16px;text-align:center"><a href="/" style="color:var(--muted);font-size:.85rem">← Back</a></p>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashView" class="container" style="display:none">
+  <div class="topbar">
+    <h1>Teacher Dashboard</h1>
+    <div style="display:flex;gap:14px;align-items:center">
+      <span class="who" id="whoT"></span>
+      <button class="btn-ghost" id="logoutT" style="padding:8px 14px;font-size:.85rem">Logout</button>
+    </div>
+  </div>
+
+  <!-- CREATE LECTURE -->
+  <div class="card">
+    <h2>Start a new lecture</h2>
+    <p class="sub">Fill in the lecture details and initiate attendance.</p>
+    <form id="lectureForm">
+      <div class="row">
+        <div class="field"><label>Subject</label><input id="fSubject" placeholder="Data Structures" required></div>
+        <div class="field"><label>Room No.</label><input id="fRoom" placeholder="A-201" required></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Branch</label>
+          <select id="fBranch" required>
+            <option value="">Select branch…</option>
+            <option>CSE</option><option>IT</option><option>ECE</option><option>EEE</option><option>MECH</option><option>CIVIL</option>
+          </select>
+        </div>
+        <div class="field"><label>Duration (min)</label><input id="fDuration" type="number" min="5" max="300" value="50" required></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Date</label><input id="fDate" type="date" required></div>
+        <div class="field"><label>Start time</label><input id="fStart" type="time" required></div>
+      </div>
+      <button class="btn-primary" style="width:100%;margin-top:6px">Initiate Lecture</button>
+    </form>
+  </div>
+
+  <!-- LECTURES -->
+  <h2 class="section-title">Your lectures</h2>
+  <div id="lectures" class="lecture-list"></div>
+
+  <!-- ATTENDANCE VIEW -->
+  <div id="attendancePanel" style="display:none;margin-top:30px">
+    <h2 class="section-title" id="attTitle">Attendance</h2>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:10px">
+        <div id="attSub" style="color:var(--muted);font-size:.85rem"></div>
+        <button class="btn-ghost" id="closeAtt" style="padding:8px 14px;font-size:.85rem">Close</button>
+      </div>
+      <div id="attBody"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function toast(msg, type='info'){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(t._t);
+  t._t = setTimeout(()=> t.className='toast', 2600);
+}
+async function api(url, opts={}){
+  const r = await fetch(url, { headers:{'Content-Type':'application/json'}, ...opts });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+
+/* --- Session check --- */
+let me = null;
+(async () => {
+  me = await api('/api/me');
+  if(me.role === 'teacher'){
+    $('loginView').style.display = 'none';
+    $('dashView').style.display  = 'block';
+    $('whoT').textContent = 'Logged in as ' + me.name;
+    loadLectures();
+  } else {
+    $('loginView').style.display = 'grid';
+  }
+})();
+
+/* --- Login --- */
+$('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try{
+    await api('/api/login', { method:'POST', body: JSON.stringify({
+      role:'teacher', name: $('tName').value.trim(), password: $('tPass').value
+    })});
+    location.reload();
+  }catch(err){ toast(err.message,'err'); }
+};
+
+$('logoutT').onclick = async () => {
+  await api('/api/logout', { method:'POST' });
+  location.href = '/';
+};
+
+/* --- Create lecture --- */
+$('lectureForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try{
+    await api('/api/lectures', { method:'POST', body: JSON.stringify({
+      subject: $('fSubject').value.trim(),
+      branch:  $('fBranch').value,
+      room:    $('fRoom').value.trim(),
+      date:    $('fDate').value,
+      startTime: $('fStart').value,
+      duration:  $('fDuration').value
+    })});
+    toast('Lecture initiated ✓','ok');
+    $('lectureForm').reset();
+    loadLectures();
+  }catch(err){ toast(err.message,'err'); }
+};
+
+/* --- Lectures list --- */
+async function loadLectures(){
+  const list = await api('/api/lectures');
+  const box = $('lectures');
+  if(!list.length){
+    box.innerHTML = '<div class="card empty">No lectures yet. Create one above to begin.</div>';
+    return;
+  }
+  box.innerHTML = list.map(l => `
+    <div class="lecture">
+      <div class="meta">
+        <h3>${esc(l.subject)} <span class="pill ${l.status}">${l.status}</span></h3>
+        <div class="details">
+          <span>📚 ${esc(l.branch)}</span>
+          <span>🏫 Room ${esc(l.room)}</span>
+          <span>📅 ${esc(l.lecture_date)}</span>
+          <span>🕒 ${esc(l.start_time)}</span>
+          <span>⏱ ${l.duration_min} min</span>
+          <span>✅ ${l.present_count} present</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${l.status === 'active' ? `<button class="btn-danger" onclick="stopLecture(${l.id})" style="padding:9px 15px;font-size:.83rem">Stop Attendance</button>` : ''}
+        <button class="btn-ghost" onclick="viewAttendance(${l.id})" style="padding:9px 15px;font-size:.83rem">View Present</button>
+      </div>
+    </div>
+  `).join('');
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function stopLecture(id){
+  if(!confirm('Stop attendance for this lecture? Students will no longer be able to scan.')) return;
+  try{
+    await api(`/api/lectures/${id}/stop`, { method:'POST' });
+    toast('Attendance stopped','ok');
+    loadLectures();
+  }catch(err){ toast(err.message,'err'); }
+}
+
+let attRefresh = null;
+async function viewAttendance(id){
+  clearInterval(attRefresh);
+  $('attendancePanel').style.display = 'block';
+  const render = async () => {
+    try{
+      const data = await api(`/api/lectures/${id}/attendance`);
+      $('attTitle').textContent = `Present — ${data.lecture.subject} (${data.lecture.branch})`;
+      $('attSub').textContent = `${data.present.length} students present · ${data.lecture.lecture_date} ${data.lecture.start_time} · Room ${data.lecture.room}`;
+      $('attBody').innerHTML = data.present.length
+        ? `<table class="present-table"><thead><tr><th>#</th><th>Roll No.</th><th>Name</th><th>Scanned At (UTC)</th></tr></thead><tbody>
+            ${data.present.map((p,i)=>`<tr><td>${i+1}</td><td class="roll">${esc(p.student_rollno)}</td><td>${esc(p.student_name)}</td><td>${esc(p.scanned_at)}</td></tr>`).join('')}
+          </tbody></table>`
+        : `<div class="empty">No students have scanned yet.</div>`;
+    }catch(err){ toast(err.message,'err'); }
+  };
+  await render();
+  // Auto-refresh if active
+  attRefresh = setInterval(render, 2500);
+  document.getElementById('attendancePanel').scrollIntoView({behavior:'smooth', block:'start'});
+}
+$('closeAtt').onclick = () => {
+  clearInterval(attRefresh);
+  $('attendancePanel').style.display = 'none';
+};
+</script>
+</body>
+</html>
