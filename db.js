@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 
-const db = new Database('attendance.db');
+const db = new Database(process.env.RENDER_DISK_PATH ? `${process.env.RENDER_DISK_PATH}/attendance.db` : 'attendance.db');
 db.pragma('journal_mode = WAL');
 
 db.exec(`
