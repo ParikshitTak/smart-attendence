@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import db from './db.js';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
 const ESP32_KEY = process.env.ESP32_KEY || 'esp32-shared-secret';
 
@@ -248,4 +248,4 @@ app.post('/api/scan', (req, res) => {
   });
 });
 
-app.listen(PORT, () => console.log(`Smart Attendance running → http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Smart Attendance running → Port ${PORT}`));
